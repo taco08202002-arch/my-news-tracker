@@ -1,0 +1,52 @@
+// api/news.js - Vercel Serverless Function for V14.0
+
+const fetch = require('node-fetch');
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
+
+module.exports = async (req, res) => {
+    // Standard CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    if (req.method === 'OPTIONS') return res.status(200).end();
+
+    if (!NEWS_API_KEY) {
+        return res.status(500).json({ error: "錯誤：伺服器未配置 NEWS_API_KEY 環境變數。" });
+    }
+
+    const { q, country } = req.query;
+    if (!q && !country) {
+        return res.status(400).json({ error: "錯誤：必須提供關鍵詞(q)或國家(country)參數。" });
+    }
+
+    const fifteenDaysAgo = new Date();
+    fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+    const fromDate = fifteenDaysAgo.toISOString().split('T')[0];
+    
+    let apiUrl;
+
+    if (country) {
+        // --- Country Mode ---
+        // For country-specific economic news, 'top-headlines' with 'business' category is best.
+        apiUrl = `https://newsapi.org/v2/top-headlines?country=${country}&category=business&apiKey=${NEWS_API_KEY}&pageSize=100`;
+    } else {
+        // --- Global Keyword Mode ---
+        // For global topics, 'everything' is more powerful.
+        apiUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&from=${fromDate}&sortBy=publishedAt&apiKey=${NEWS_API_KEY}&pageSize=100&language=en`;
+    }
+
+    try {
+        const newsResponse = await fetch(apiUrl);
+        const newsData = await newsResponse.json();
+
+        if (newsData.status === 'error') {
+            throw new Error(newsData.message);
+        }
+        
+        res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate');
+        res.status(200).json(newsData);
+    } catch (error) {
+        console.error("獲取新聞時出錯:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
