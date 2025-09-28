@@ -1,35 +1,38 @@
-// api/news.js - Vercel Serverless Function for V15.0 - Stable Fetch
+// api/news.js - Vercel Serverless Function for V16.0 - Final Fix
 
-// 使用更現代、更穩定的 undici 函式庫來發起網路請求
-import { request } from 'undici';
+// 使用 CommonJS 語法載入與之相容的 node-fetch@2 版本
+const fetch = require('node-fetch');
 
+// 從環境變數中讀取 API 金鑰
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
-export default async function handler(req, res) {
-    // 處理瀏覽器的 OPTIONS 預檢請求 (CORS)
-    if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        return res.status(204).send('');
-    }
-    
-    // 設定標準 CORS 標頭
+// 使用 module.exports 匯出函數，這是 CommonJS 的標準
+module.exports = async (req, res) => {
+    // 設定標準 CORS 標頭，允許任何來源的 GET 請求
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    
+    // 處理瀏覽器在正式請求前的 OPTIONS 預檢請求
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    // 設定快取策略，提升效能
     res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate');
 
-
+    // 檢查 API 金鑰是否存在
     if (!NEWS_API_KEY) {
         return res.status(500).json({ error: "錯誤：伺服器未配置 NEWS_API_KEY 環境變數。" });
     }
 
-    // 從請求的 URL 中解構查詢參數
+    // 從請求中解構查詢參數
     const { q, country } = req.query;
 
     if (!q && !country) {
         return res.status(400).json({ error: "錯誤：必須提供關鍵詞(q)或國家(country)參數。" });
     }
 
+    // 計算 15 天前的日期
     const fifteenDaysAgo = new Date();
     fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
     const fromDate = fifteenDaysAgo.toISOString().split('T')[0];
@@ -43,28 +46,23 @@ export default async function handler(req, res) {
     }
 
     try {
-        // 使用 undici 的 request 方法發起請求
-        const { statusCode, body } = await request(apiUrl);
-
-        if (statusCode !== 200) {
-            // 如果 NewsAPI 返回非 200 狀態碼，拋出錯誤
-            throw new Error(`NewsAPI returned status code ${statusCode}`);
+        const newsResponse = await fetch(apiUrl);
+        // 檢查 NewsAPI 的回應是否成功
+        if (!newsResponse.ok) {
+            // 如果不成功，嘗試解析錯誤訊息並拋出
+            const errorData = await newsResponse.json();
+            throw new Error(errorData.message || `NewsAPI 返回狀態碼 ${newsResponse.status}`);
         }
         
-        // 將回應的主體（body）解析為 JSON
-        const newsData = await body.json();
-
-        if (newsData.status === 'error') {
-            throw new Error(newsData.message);
-        }
+        const newsData = await newsResponse.json();
         
         // 成功，返回新聞數據
         res.status(200).json(newsData);
 
     } catch (error) {
-        console.error("獲取新聞時出錯:", error);
-        // 將錯誤訊息以 JSON 格式返回給前端
-        res.status(500).json({ error: error.message });
+        console.error("後端獲取新聞時出錯:", error);
+        // 將詳細的錯誤訊息以 JSON 格式返回給前端
+        res.status(500).json({ error: `後端錯誤: ${error.message}` });
     }
-}
+};
 
