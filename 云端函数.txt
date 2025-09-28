@@ -1,4 +1,4 @@
-// api/news.js - Vercel Serverless Function for V17.0 - Final Stable Version
+// api/news.js - Vercel Serverless Function for V18.0 - Final Bypass Architecture
 
 // 使用 CommonJS 語法載入與之相容的 node-fetch@2 版本
 const fetch = require('node-fetch');
@@ -8,60 +8,64 @@ const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 // 使用 module.exports 匯出函數，這是 CommonJS 的標準
 module.exports = async (req, res) => {
-    // 設定標準 CORS 標頭，允許任何來源的 GET 請求
+    // 設定標準 CORS 標頭
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     
-    // 處理瀏覽器在正式請求前的 OPTIONS 預檢請求
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
 
-    // 設定快取策略，提升效能
     res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate');
 
-    // 檢查 API 金鑰是否存在
     if (!NEWS_API_KEY) {
         return res.status(500).json({ error: "錯誤：伺服器未配置 NEWS_API_KEY 環境變數。" });
     }
 
-    // 從請求中解構查詢參數
     const { q, country } = req.query;
 
     if (!q && !country) {
         return res.status(400).json({ error: "錯誤：必須提供關鍵詞(q)或國家(country)參數。" });
     }
 
-    // 計算 15 天前的日期
     const fifteenDaysAgo = new Date();
     fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
     const fromDate = fifteenDaysAgo.toISOString().split('T')[0];
     
-    let apiUrl;
+    let targetApiUrl;
 
     if (country) {
-        apiUrl = `https://newsapi.org/v2/top-headlines?country=${country}&category=business&apiKey=${NEWS_API_KEY}&pageSize=100`;
+        targetApiUrl = `https://newsapi.org/v2/top-headlines?country=${country}&category=business&apiKey=${NEWS_API_KEY}&pageSize=100`;
     } else {
-        apiUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&from=${fromDate}&sortBy=publishedAt&apiKey=${NEWS_API_KEY}&pageSize=100&language=en`;
+        targetApiUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&from=${fromDate}&sortBy=publishedAt&apiKey=${NEWS_API_KEY}&pageSize=100&language=en`;
     }
 
+    // *** 終極架構變更 ***
+    // 讓 Vercel 伺服器去請求公共代理，由公共代理去請求 NewsAPI
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetApiUrl)}`;
+
     try {
-        const newsResponse = await fetch(apiUrl);
-        // 檢查 NewsAPI 的回應是否成功
-        if (!newsResponse.ok) {
-            // 如果不成功，嘗試解析錯誤訊息並拋出
-            const errorData = await newsResponse.json();
-            throw new Error(errorData.message || `NewsAPI 返回狀態碼 ${newsResponse.status}`);
+        const proxyResponse = await fetch(proxyUrl);
+        
+        if (!proxyResponse.ok) {
+            throw new Error(`代理伺服器返回狀態碼 ${proxyResponse.status}`);
         }
         
-        const newsData = await newsResponse.json();
+        const proxyData = await proxyResponse.json();
         
-        // 成功，返回新聞數據
+        // allorigins.win 會將原始 API 回應包裝在 "contents" 欄位中
+        // 我們需要將其解析出來
+        const newsData = JSON.parse(proxyData.contents);
+
+        if (newsData.status === 'error') {
+            throw new Error(`NewsAPI 錯誤: ${newsData.message}`);
+        }
+        
+        // 成功，返回從代理中提取出的新聞數據
         res.status(200).json(newsData);
 
     } catch (error) {
-        console.error("後端獲取新聞時出錯:", error);
-        // 將詳細的錯誤訊息以 JSON 格式返回給前端
+        console.error("後端透過代理獲取新聞時出錯:", error);
         res.status(500).json({ error: `後端錯誤: ${error.message}` });
     }
 };
