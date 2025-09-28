@@ -1,4 +1,4 @@
-// api/news.js - Vercel Serverless Function for V16.0 - Final Fix
+// api/news.js - Vercel Serverless Function for V17.0 - Final Stable Version
 
 // 使用 CommonJS 語法載入與之相容的 node-fetch@2 版本
 const fetch = require('node-fetch');
